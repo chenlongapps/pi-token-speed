@@ -13,6 +13,14 @@
     "ttft",
     "terminal-ui"
   ],
+  "homepage": "https://github.com/chenlongapps/pi-token-speed",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chenlongapps/pi-token-speed.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chenlongapps/pi-token-speed/issues"
+  },
   "license": "MIT",
   "type": "module",
   "pi": {
@@ -22,6 +30,7 @@
     "test": "node --test test/*.test.mjs",
     "check": "tsc --noEmit",
     "pack:check": "npm pack --dry-run --ignore-scripts",
+    "release:patch": "npm version patch && npm publish",
     "smoke": "pi --offline --no-session --no-extensions --no-skills --no-prompt-templates --no-context-files -e ./index.ts"
   },
   "engines": {
@@ -38,6 +47,7 @@
   "files": [
     "index.ts",
     "README.md",
+    "README.zh-CN.md",
     "LICENSE",
     "package.json"
   ]
