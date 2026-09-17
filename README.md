@@ -1,4 +1,4 @@
-# pi-token-speed
+# @chenlongapps/pi-token-speed
 
 一个轻量级的 [Pi Coding Agent](https://pi.dev/) 扩展，在 Pi 的终端状态栏显示实时 LLM token 生成指标。
 
@@ -27,7 +27,7 @@ pi -e ./index.ts
 发布到 npm 后，也可以安装：
 
 ```bash
-pi install npm:pi-token-speed@latest
+pi install npm:@chenlongapps/pi-token-speed@latest
 ```
 
 已使用 Pi `0.85.1` 验证。开发和测试要求 Node.js `>=22.19.0`。

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "pi-token-speed",
+  "name": "@chenlongapps/pi-token-speed",
   "version": "0.1.0",
   "description": "Pi extension for displaying live token generation speed, average TPS, and TTFT",
   "keywords": [
