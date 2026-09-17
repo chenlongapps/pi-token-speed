@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "pi-token-speed",
+  "version": "0.1.0",
+  "description": "Pi extension for displaying live token generation speed, average TPS, and TTFT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "llm",
+    "token-speed",
+    "tps",
+    "ttft",
+    "terminal-ui"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "tsc --noEmit",
+    "pack:check": "npm pack --dry-run --ignore-scripts",
+    "smoke": "pi --offline --no-session --no-extensions --no-skills --no-prompt-templates --no-context-files -e ./index.ts"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@types/node": "22.19.19",
+    "typescript": "5.9.3"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ]
+}
