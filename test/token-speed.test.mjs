@@ -75,7 +75,7 @@ test("waits for two sample timestamps, then reconciles with official output with
   assert.equal(h.status(), undefined);
   h.delta("x".repeat(40));
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~20.0 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~10.0 · AVG: - · TTFT: -");
   h.advance(1_000);
   h.end(100);
   assert.equal(h.status(), "TPS: 31.3 · AVG: 31.3 · TTFT: 1.2");
@@ -94,19 +94,33 @@ test("hidden reasoning is included in the full request duration for final TPS an
   assert.equal(h.status(), "TPS: 100 · AVG: 100 · TTFT: 10.0");
 });
 
-test("long TTFT does not dilute live throughput and sub-second samples have no duration floor", (t) => {
+test("long TTFT does not dilute live throughput and live samples require 500 ms", (t) => {
   const h = harness(t);
   h.begin();
   h.advance(10_000);
   h.delta("x".repeat(40));
-  h.advance(50, false);
+  h.advance(100, false);
   h.delta("x".repeat(40), "thinking_delta", 1);
-  h.advance(50);
-  // 20 estimated tokens over the samples' 50 ms span, independent of timer time.
-  assert.equal(h.status(), "TPS: ~400 · AVG: - · TTFT: -");
+  h.advance(0);
+  assert.equal(h.status(), undefined, "a 100 ms burst must not produce a live rate");
+  h.advance(400, false);
+  h.delta("x".repeat(40));
+  h.advance(0);
+  // Ignore the first 10-token sample; 20 tokens in the remaining 500 ms = 40 TPS.
+  assert.equal(h.status(), "TPS: ~40.0 · AVG: - · TTFT: -");
 });
 
-test("a single sample or several deltas at one timestamp cannot produce a live rate", (t) => {
+test("large chunks 50-100 ms apart do not immediately produce an extreme TPS", (t) => {
+  const h = harness(t);
+  h.begin();
+  h.delta("x".repeat(4_000));
+  h.advance(100, false);
+  h.delta("x".repeat(4_000));
+  h.advance(0);
+  assert.equal(h.status(), undefined, "do not publish a rate for a 100 ms burst");
+});
+
+test("a single timestamp cannot produce a live rate; the 500 ms boundary can", (t) => {
   const h = harness(t);
   h.begin();
   h.delta("x");
@@ -115,11 +129,38 @@ test("a single sample or several deltas at one timestamp cannot produce a live r
   assert.equal(h.status(), undefined);
   h.delta("xx");
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~10.0 · AVG: - · TTFT: -");
-  // New bytes at the same latest timestamp still update a measurable window.
+  assert.equal(h.status(), undefined, "a 100 ms sample interval is too short");
   h.delta("xxxx");
+  h.advance(400, false);
+  h.delta("x".repeat(20));
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~13.5 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~13.0 · AVG: - · TTFT: -");
+});
+
+test("different chunking of the same output rate produces comparable live TPS", (t) => {
+  const h = harness(t);
+  const measure = (split) => {
+    h.emit("session_start");
+    h.begin();
+    h.delta("x".repeat(400)); // Initial chunk is outside the measured interval.
+    if (split) {
+      h.advance(200, false);
+      h.delta("x".repeat(80));
+      h.advance(200, false);
+      h.delta("x".repeat(80));
+      h.advance(100, false);
+      h.delta("x".repeat(40));
+    } else {
+      h.advance(500, false);
+      h.delta("x".repeat(200));
+    }
+    h.advance(0);
+    return h.status();
+  };
+  const split = measure(true);
+  const single = measure(false);
+  assert.equal(split, "TPS: ~100 · AVG: - · TTFT: -");
+  assert.equal(single, split);
 });
 
 test("averages are weighted by full request duration and exclude tool and user wait time", (t) => {
@@ -207,10 +248,10 @@ test("tool argument deltas contribute to live TPS, while tool names and completi
   h.advance(1_000, false);
   h.delta("{}" + " ".repeat(38), "toolcall_delta");
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~20.0 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~10.0 · AVG: - · TTFT: -");
   h.update("toolcall_end", { toolCall });
   h.advance(100);
-  assert.equal(h.status(), "TPS: ~20.0 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~10.0 · AVG: - · TTFT: -");
 });
 
 test("UTF-8 fallback includes Chinese, emoji and thinking without rounding individual chunks", (t) => {
@@ -232,10 +273,10 @@ test("live estimates measure UTF-8 bytes rather than JavaScript string length", 
   const h = harness(t);
   h.begin();
   h.delta("你🙂");
-  h.advance(100, false);
+  h.advance(500, false);
   h.delta("你🙂", "thinking_delta", 1);
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~35.0 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~3.50 · AVG: - · TTFT: -");
 });
 
 test("block completions fill missing bytes once per block without generating live samples", (t) => {
@@ -245,7 +286,7 @@ test("block completions fill missing bytes once per block without generating liv
   h.advance(1_000, false);
   h.delta("cd");
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~1.00 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~0.50 · AVG: - · TTFT: -");
   for (let i = 0; i < 2; i++) {
     h.update("text_end", { content: "abcdefgh" });
     h.update("thinking_end", { content: "🙂", contentIndex: 1 });
@@ -255,7 +296,7 @@ test("block completions fill missing bytes once per block without generating liv
     });
   }
   h.advance(1_000);
-  assert.equal(h.status(), "TPS: ~1.00 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~0.50 · AVG: - · TTFT: -");
   h.end(0);
   // 8 text + 4 thinking + 3 tool bytes => 4 tokens over the full 2 seconds.
   assert.equal(h.status(), "TPS: ~2.00 · AVG: ~2.00 · TTFT: 0.0");
@@ -283,17 +324,17 @@ test("the two-second window evicts old samples and applies EWMA only on new delt
   h.advance(1_000, false);
   h.delta("x".repeat(40));
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~110 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~10.0 · AVG: - · TTFT: -");
+  h.advance(1_000, false);
+  h.delta("x".repeat(80));
+  h.advance(0);
+  // The first sample is still on the 2 s boundary: 30 tokens / 2 s = 15 TPS.
+  assert.equal(h.status(), "TPS: ~11.8 · AVG: - · TTFT: -");
   h.advance(1_000, false);
   h.delta("x".repeat(40));
   h.advance(0);
-  // The first sample is still on the 2 s boundary: 0.35 * 60 + 0.65 * 110.
-  assert.equal(h.status(), "TPS: ~92.5 · AVG: - · TTFT: -");
-  h.advance(1_000, false);
-  h.delta("x".repeat(40));
-  h.advance(0);
-  // The large first sample has expired: 0.35 * 15 + 0.65 * 92.5.
-  assert.equal(h.status(), "TPS: ~65.4 · AVG: - · TTFT: -");
+  // The initial point has expired; the retained samples still measure 15 TPS.
+  assert.equal(h.status(), "TPS: ~12.9 · AVG: - · TTFT: -");
   const frozen = h.status();
   const count = h.statuses.length;
   for (let i = 0; i < 10; i++) h.advance(100);
@@ -306,7 +347,7 @@ test("the two-second window evicts old samples and applies EWMA only on new delt
   h.advance(1_000, false);
   h.delta("x".repeat(40));
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~49.5 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~11.9 · AVG: - · TTFT: -");
   h.emit("agent_end");
   assert.equal(h.timers.size, 0);
 });
@@ -357,27 +398,27 @@ test("a new provider attempt resets bytes, TTFT, the live window and smoothing w
   h.advance(100, false);
   h.delta("x".repeat(400));
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~2000 · AVG: - · TTFT: -");
+  assert.equal(h.status(), undefined, "a 100 ms pair of large chunks is not a live sample");
   h.advance(500);
   h.emit("before_provider_request");
   assert.equal(h.timers.size, 0);
   h.advance(500);
   h.delta("x".repeat(4));
-  h.advance(100, false);
+  h.advance(500, false);
   h.delta("x".repeat(4));
   h.advance(0);
-  assert.equal(h.status(), "TPS: ~20.0 · AVG: - · TTFT: -");
+  assert.equal(h.status(), "TPS: ~2.00 · AVG: - · TTFT: -");
   h.advance(400);
   h.end(0);
-  assert.equal(h.status(), "TPS: ~2.00 · AVG: ~2.00 · TTFT: 0.5");
+  assert.equal(h.status(), "TPS: ~1.43 · AVG: ~1.43 · TTFT: 0.5");
 });
 
 test("each new turn starts a fresh live window and EWMA", (t) => {
   const h = harness(t);
-  for (const [bytes, expected] of [[400, "2000"], [4, "20.0"]]) {
+  for (const [bytes, expected] of [[400, "200"], [4, "2.00"]]) {
     h.begin();
     h.delta("x".repeat(bytes));
-    h.advance(100, false);
+    h.advance(500, false);
     h.delta("x".repeat(bytes));
     h.advance(0);
     assert.equal(h.status(), `TPS: ~${expected} · AVG: - · TTFT: -`);
@@ -547,6 +588,10 @@ test("refreshes are throttled and duplicate completion is ignored", (t) => {
   }
   assert.equal(h.statuses.length, count);
   assert.equal(h.timers.size, 1);
+  h.advance(0);
+  assert.equal(h.statuses.length, count, "the stream has only been observed for 100 ms");
+  h.advance(400, false);
+  h.delta("world");
   h.advance(0);
   assert.equal(h.statuses.length, count + 1);
   h.advance(900);

@@ -2,12 +2,13 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 const STATUS_KEY = "token-speed";
 const WINDOW_MS = 2_000;
+const MIN_SAMPLE_MS = 500;
 const REFRESH_MS = 100;
 const EWMA_ALPHA = 0.35;
 const BYTES_PER_TOKEN = 4;
 const encoder = new TextEncoder();
 
-type Sample = { at: number; tokens: number };
+type Sample = { at: number; cumulativeTokens: number };
 type ResponseTiming = {
   requestAt: number;
   firstTokenAt?: number;
@@ -79,10 +80,13 @@ export default function tokenSpeed(pi: ExtensionAPI): void {
     while (samples.length > 0 && now - samples[0]!.at > WINDOW_MS) samples.shift();
     const first = samples[0];
     const last = samples[samples.length - 1];
-    // A single timestamp cannot measure throughput. Keep the last useful reading.
-    if (!first || !last || last.at <= first.at) return false;
-    const tokens = samples.reduce((sum, sample) => sum + sample.tokens, 0);
-    const rate = (tokens * 1_000) / (last.at - first.at);
+    // A short observation window is sensitive to chunk delivery bursts. Keep
+    // the last useful reading until at least 500 ms of stream time is observed.
+    if (!first || !last) return false;
+    const duration = last.at - first.at;
+    if (duration < MIN_SAMPLE_MS) return false;
+    const tokens = last.cumulativeTokens - first.cumulativeTokens;
+    const rate = (tokens * 1_000) / duration;
     if (!positive(rate)) return false;
     current.smoothedTps = current.smoothedTps === undefined
       ? rate
@@ -105,8 +109,9 @@ export default function tokenSpeed(pi: ExtensionAPI): void {
     // not inflate the token estimate. Only the final fallback total is rounded.
     const tokens = bytes / BYTES_PER_TOKEN;
     const previous = current.samples[current.samples.length - 1];
-    if (previous && now === previous.at) previous.tokens += tokens;
-    else current.samples.push({ at: now, tokens });
+    const cumulativeTokens = (previous?.cumulativeTokens ?? 0) + tokens;
+    if (previous && now === previous.at) previous.cumulativeTokens = cumulativeTokens;
+    else current.samples.push({ at: now, cumulativeTokens });
     current.hasNewSamples = true;
     if (timer === undefined) {
       timer = setInterval(() => {
